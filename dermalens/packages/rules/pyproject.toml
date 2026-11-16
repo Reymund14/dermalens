@@ -1,0 +1,16 @@
+[project]
+name = "dermalens-rules"
+version = "1.0.0"
+description = "DermaLens triage cascade and deterministic recommendation engine (pure functions)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "hypothesis>=6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dermalens_rules"]

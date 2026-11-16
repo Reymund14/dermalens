@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "DermaLens",
+    "slug": "dermalens",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ph.iconic.dermalens",
+      "infoPlist": {
+        "NSCameraUsageDescription": "DermaLens uses the camera to take three guided face photos for your skin pre-screening.",
+        "NSPhotoLibraryUsageDescription": "Choose a face photo for your skin pre-screening."
+      }
+    },
+    "android": {
+      "package": "ph.iconic.dermalens",
+      "adaptiveIcon": {
+        "backgroundColor": "#E7EEF6",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["android.permission.CAMERA"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "DermaLens uses the camera to take three guided face photos for your skin pre-screening.", "recordAudioAndroid": false }],
+      ["expo-image-picker", { "photosPermission": "Choose a face photo for your skin pre-screening." }],
+      "expo-secure-store"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:8000"
+    }
+  }
+}

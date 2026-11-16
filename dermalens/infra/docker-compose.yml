@@ -1,0 +1,40 @@
+# Local stack: PostgreSQL 16 + inference service + API.
+#   docker compose -f infra/docker-compose.yml up --build
+# Then seed once:
+#   docker compose -f infra/docker-compose.yml exec api python -m app.seed
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: dermalens
+      POSTGRES_USER: dermalens
+      POSTGRES_PASSWORD: dermalens-dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../services/api/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dermalens"]
+      interval: 3s
+      retries: 20
+  inference:
+    build: { context: .., dockerfile: services/inference/Dockerfile }
+    # To serve a trained model, mount it and set DERMALENS_MODEL_PATH, DERMALENS_MODEL_CONFIG, DERMALENS_MODEL_SHA256.
+    ports: ["8001:8001"]
+  api:
+    build: { context: .., dockerfile: services/api/Dockerfile }
+    depends_on:
+      db: { condition: service_healthy }
+      inference: { condition: service_started }
+    environment:
+      DATABASE_URL: postgresql+psycopg://dermalens:dermalens-dev@db:5432/dermalens
+      INFERENCE_URL: http://inference:8001
+      STORAGE_DIR: /data/storage
+      JWT_SECRET: change-me-in-every-real-environment-please
+      # DATA_KEY: generate with  python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+    volumes:
+      - storage:/data/storage
+    ports: ["8000:8000"]
+volumes:
+  pgdata:
+  storage:

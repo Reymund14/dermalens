@@ -1,0 +1,5 @@
+-r services/api/requirements.txt
+pytest==9.1.1
+hypothesis==6.168.5
+onnx==1.23.2
+playwright
