@@ -70,6 +70,8 @@ def get_summary(summary_id: str, request: Request, user: M.User = Depends(staff)
 @router.get("/summaries/{summary_id}/pdf")
 def get_summary_pdf(summary_id: str, request: Request, user: M.User = Depends(staff), db: Session = Depends(get_db)):
     row = _live(db.get(M.ConsultationSummary, uuid.UUID(summary_id)))
+    if row.pdf_object_key == "purged":
+        raise HTTPException(410, "summary PDF is no longer retained")
     audit(db, user, "view_summary_pdf", "consultation_summary", row.id, request)
     db.commit()
     return Response(storage.get(row.pdf_object_key), media_type="application/pdf")
@@ -104,9 +106,12 @@ def review_summary(summary_id: str, body: ReviewIn, request: Request, user: M.Us
 def summary_image(summary_id: str, view: str, request: Request, user: M.User = Depends(staff),
                   db: Session = Depends(get_db)):
     """Photos of a shared case. Patients chose to share these with the clinic."""
+    from .patient import latest_consents
+
     row = _live(db.get(M.ConsultationSummary, uuid.UUID(summary_id)))
-    img = current_images(db.get(M.CaptureSession, row.session_id)).get(view)
-    if img is None or img.object_key == "purged":
+    session = db.get(M.CaptureSession, row.session_id)
+    img = current_images(session).get(view) if session else None
+    if img is None or img.object_key == "purged" or not latest_consents(db, session.user_id).get("image_storage"):
         raise HTTPException(404, "no image")
     audit(db, user, "view_summary_image", "consultation_summary", row.id, request, {"view": view})
     db.commit()

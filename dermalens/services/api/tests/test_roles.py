@@ -12,6 +12,7 @@ def shared_case(client, monkeypatch, grades):
     sid = assess(client, h)
     res = submit(client, h, sid)
     client.post(f"{API}/consents", headers=h, json={"purpose": "share_with_clinic", "granted": True})
+    client.post(f"{API}/consents", headers=h, json={"purpose": "image_storage", "granted": True})
     s = client.post(f"{API}/sessions/{sid}/summary", headers=h, json={"share_with_iconic": True}).json()
     return h, res, s
 

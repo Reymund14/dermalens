@@ -4,19 +4,51 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Set DERMALENS_ENV=production in every real deployment. It turns missing
+# secrets into a startup error instead of a generated temporary value.
+PRODUCTION = os.getenv("DERMALENS_ENV", "development").strip().lower() in ("production", "prod")
+
 
 def _env(name: str, default: str) -> str:
     return os.getenv(name, default)
 
 
+def _env_bool(name: str, default: str) -> bool:
+    return _env(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _secret(name: str) -> str:
+    value = os.getenv(name, "")
+    if not value:
+        raise RuntimeError(f"{name} must be set (see dev.sh for local development)")
+    return value
+
+
+def _cors_origins() -> list[str]:
+    default = "" if PRODUCTION else "http://localhost:8081,http://localhost:19006"
+    origins = [o.strip() for o in _env("CORS_ORIGINS", default).split(",") if o.strip()]
+    if PRODUCTION and (not origins or "*" in origins):
+        raise RuntimeError("CORS_ORIGINS must list explicit origins when DERMALENS_ENV=production")
+    return origins
+
+
+def _public_base_url() -> str:
+    url = _env("PUBLIC_BASE_URL", "")
+    if PRODUCTION and not url.startswith("https://"):
+        raise RuntimeError("PUBLIC_BASE_URL must be an HTTPS origin when DERMALENS_ENV=production")
+    return url
+
+
 @dataclass
 class Settings:
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL", "sqlite:///./dermalens-dev.db"))
-    # Dev defaults only. Production must set real secrets (see README).
-    jwt_secret: str = field(default_factory=lambda: _env("JWT_SECRET", "dev-only-change-me-dev-only-change-me"))
-    data_key: str = field(default_factory=lambda: _env("DATA_KEY", "AUlI14Gsve1MbMj__iKvEHTJjVfIpWKZgqWV7PFn3FY="))
+    jwt_secret: str = field(default_factory=lambda: _secret("JWT_SECRET"))
+    data_key: str = field(default_factory=lambda: _secret("DATA_KEY"))
     storage_dir: Path = field(default_factory=lambda: Path(_env("STORAGE_DIR", "./storage")))
     inference_url: str = field(default_factory=lambda: _env("INFERENCE_URL", ""))  # empty = in-process
+    # Public origin for share links and QR codes (set behind a reverse proxy).
+    public_base_url: str = field(default_factory=_public_base_url)
+    auth_rate_limit_enabled: bool = field(default_factory=lambda: _env_bool("AUTH_RATE_LIMIT_ENABLED", "1"))
     access_token_minutes: int = 15
     refresh_token_days: int = 30
     upload_url_seconds: int = 300
@@ -27,7 +59,7 @@ class Settings:
     questionnaire_version: str = "intake-1.0.0"
     clinic_contact: str = field(default_factory=lambda: _env(
         "CLINIC_CONTACT", "ICONIC Aesthetic Clinic (add address, phone and booking link)"))
-    cors_origins: list[str] = field(default_factory=lambda: _env("CORS_ORIGINS", "*").split(","))
+    cors_origins: list[str] = field(default_factory=_cors_origins)
 
 
 settings = Settings()

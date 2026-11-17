@@ -243,6 +243,22 @@ def test_admin_catalog_rules_and_jobs(client):
     assert client.get(f"{API}/admin/products", headers=h).status_code == 403
 
 
+def test_restart_frees_sessions_stuck_processing(client):
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    h, _ = register(client)
+    sid = assess(client, h)
+    with SessionLocal() as db:
+        db.get(M.CaptureSession, uuid.UUID(sid)).status = "processing"
+        db.commit()
+    with TestClient(app):
+        pass
+    with SessionLocal() as db:
+        s = db.get(M.CaptureSession, uuid.UUID(sid))
+        assert s.status == "failed" and s.error == "interrupted_by_restart"
+
+
 def test_allergen_search_and_export_and_delete(client):
     h, tok = register(client)
     res = client.get(f"{API}/allergens/search", params={"q": "fragr"}, headers=h).json()

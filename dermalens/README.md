@@ -8,7 +8,7 @@ AI-based mobile skin image pre-screening and skincare information system for ICO
 
 | Path | What it is | Status |
 | --- | --- | --- |
-| `apps/mobile` | React Native app (Expo SDK 57, TypeScript). Patients: onboarding, boundary, consent, profile, 5-step intake, guided capture, results, routine, referral, PDF summary, history, settings. Clinic staff, dermatologists and admins: their own workspaces (see below) | Working; typechecks; all four roles run in a browser |
+| `apps/mobile` | React Native app (Expo SDK 58, TypeScript). Patients: onboarding, boundary, consent, profile, 5-step intake, guided capture, results, routine, referral, PDF summary, history, settings. Clinic staff, dermatologists and admins: their own workspaces (see below) | Working; typechecks; all four roles run in a browser |
 | `services/api` | FastAPI core API: auth (argon2id, 15-min JWT, rotating refresh tokens), consent, intake, capture sessions with signed upload URLs, triage, routines, PDF summary, clinic, dermatologist and admin endpoints, audit log | Working; 20 tests on SQLite **and** PostgreSQL 16 |
 | `services/inference` | Inference service: server-side quality re-check, EXIF stripping, calibration / thresholds / uncertainty band / OOD flag, ONNX Runtime loader with checksum check | Working with a **stub model** (see below); 9 tests |
 | `packages/rules` | Pure-function rules package: 7-rule triage cascade and deterministic AM/PM recommendation engine with allergen, contraindication and conflict checks | Working; 38 tests incl. 400 property-based cases |
@@ -24,7 +24,7 @@ AI-based mobile skin image pre-screening and skincare information system for ICO
 
 ## Run it
 
-Requirements: Python 3.12+, Node 20+.
+Requirements: Python 3.12+, Node 22.13+ (Expo SDK 58).
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -33,7 +33,7 @@ pip install -r requirements-dev.txt
 ./dev.sh                      # API on http://localhost:8000, OpenAPI docs at /docs
 ```
 
-`dev.sh` seeds the database and prints three development accounts (admin, clinic staff and dermatologist). Patients sign up in the app.
+`dev.sh` generates throwaway secrets for the run, seeds the database and prints three development accounts (admin, clinic staff and dermatologist). Patients sign up in the app.
 
 Mobile app:
 
@@ -42,9 +42,12 @@ cd apps/mobile
 npm install
 EXPO_PUBLIC_API_URL=http://<your-computer's-LAN-IP>:8000 npx expo start   # scan with Expo Go
 npx expo start --web                                                       # browser demo (choose photos instead of camera)
+EXPO_PUBLIC_API_URL=https://api.your-clinic.example eas build -p android --profile production
 ```
 
-With PostgreSQL instead of SQLite, set `DATABASE_URL=postgresql+psycopg://user:pass@host/dermalens`, apply `services/api/migrations/001_init.sql`, then run `python -m app.seed`. Regenerate the SQL after model changes with `python -m app.dump_schema > migrations/001_init.sql`.
+A native release build refuses to start without `EXPO_PUBLIC_API_URL`, and that URL must be HTTPS. Set it as an EAS environment variable for the `production` profile in `eas.json`; never ship `http://localhost`.
+
+With PostgreSQL instead of SQLite, set `DATABASE_URL=postgresql+psycopg://user:pass@host/dermalens`, apply `services/api/migrations/001_init.sql`, then create the first admin and seed with `ADMIN_EMAIL=you@clinic.example ADMIN_PASSWORD='a-long-password' python -m app.seed`. Regenerate the SQL after model changes with `python -m app.dump_schema > migrations/001_init.sql`.
 
 End-to-end browser check (API on :8000, `npx expo export --platform web` served on :8081):
 
@@ -66,7 +69,7 @@ Everyone signs in on the same screen; the app opens the home screen for the acco
 
 Disabled accounts cannot log in or refresh, and requests with an existing token are refused at once. Staff never see a patient's name or email; the audit log shows patients only as "patient". The per-role roadmap is in the *DermaLens Role-Based Access Roadmap* document.
 
-Development accounts (created by `python -m app.seed` unless `SEED_DEV_ACCOUNTS=0`):
+Development accounts (created only when `SEED_DEV_ACCOUNTS=1`; `./dev.sh` sets it, and it must stay off in production):
 
 | Role | Email | Password |
 | --- | --- | --- |
@@ -97,5 +100,7 @@ Development accounts (created by `python -m app.seed` unless `SEED_DEV_ACCOUNTS=
 - Train and evaluate the real model; `python ml/evaluate.py predictions.csv` reports every Level 2 metric against the roadmap targets.
 - Have the consulting dermatologist sign off the red-flag list and triage rules, and the pharmacist or cosmetic chemist sign off the conflict and contraindication tables in `packages/rules/dermalens_rules/seed.py`.
 - Replace the sample catalog with verified products.
-- Set real secrets: `JWT_SECRET`, `DATA_KEY` (Fernet key), and `SEED_DEV_ACCOUNTS=0`.
+- Set `DERMALENS_ENV=production` and real secrets: `JWT_SECRET` and `DATA_KEY` (Fernet key). Startup fails if either is missing; both are required in every environment; there are no default secrets.
+- Set `PUBLIC_BASE_URL` to the public HTTPS origin (share QR links carry a token) and `CORS_ORIGINS` to the app's explicit HTTPS origin(s); production startup refuses wildcards or HTTP. Run uvicorn with `--proxy-headers` so auth rate limiting sees each client IP, not the proxy's. Run one API instance: the auth rate limiter is in process memory.
+- Keep `SEED_DEV_ACCOUNTS=0`, and keep the database port firewalled (the compose file no longer publishes it).
 - Complete the DPIA, and get a written opinion on whether the app is a medical device under FDA Philippines rules.

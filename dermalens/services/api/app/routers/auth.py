@@ -4,11 +4,16 @@ from sqlalchemy.orm import Session
 from .. import models as M
 from ..config import settings
 from ..db import get_db
+from ..ratelimit import enforce
 from ..schemas import LoginIn, RefreshIn, RegisterIn, TokensOut
 from ..security import audit, current_user, hash_password, issue_refresh_token, make_access_token, rotate_refresh_token, \
     verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def _tokens(db: Session, user: M.User) -> TokensOut:
@@ -19,6 +24,7 @@ def _tokens(db: Session, user: M.User) -> TokensOut:
 
 @router.post("/register", response_model=TokensOut, status_code=201)
 def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)):
+    enforce(f"register:{_ip(request)}", limit=20, window_seconds=3600)
     if not body.accepted_boundary:
         raise HTTPException(422, "the informational-use statement must be accepted")
     email = body.email.lower()
@@ -35,6 +41,8 @@ def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokensOut)
 def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    enforce(f"login-ip:{_ip(request)}", limit=30, window_seconds=300)
+    enforce(f"login:{_ip(request)}:{body.email.lower()}", limit=8, window_seconds=300)
     user = db.query(M.User).filter_by(email=body.email.lower()).first()
     if user is None or user.deleted_at is not None or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "wrong email or password")
@@ -45,7 +53,8 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokensOut)
-def refresh(body: RefreshIn, db: Session = Depends(get_db)):
+def refresh(body: RefreshIn, request: Request, db: Session = Depends(get_db)):
+    enforce(f"refresh:{_ip(request)}", limit=60, window_seconds=300)
     user = rotate_refresh_token(db, body.refresh_token)
     return _tokens(db, user)
 

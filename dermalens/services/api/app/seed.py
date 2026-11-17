@@ -2,8 +2,8 @@
 
     python -m app.seed            # idempotent; safe to re-run
 
-Dev accounts are created only when SEED_DEV_ACCOUNTS=1 (the default for local
-runs). Never enable that in production.
+Dev accounts are created only when SEED_DEV_ACCOUNTS=1. That is off by default;
+dev.sh turns it on for local runs and it must stay off in production.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _upsert(db: Session, obj):
     db.merge(obj)
 
 
-def seed(db: Session, dev_accounts: bool = True) -> None:
+def seed(db: Session, dev_accounts: bool = False) -> None:
     admin = db.query(M.User).filter_by(role="admin").first()
     if dev_accounts:
         for email, role, pw, name in DEV_ACCOUNTS:
@@ -101,11 +101,23 @@ def seed(db: Session, dev_accounts: bool = True) -> None:
 
 
 def main() -> None:
+    dev_accounts = os.getenv("SEED_DEV_ACCOUNTS", "0") == "1"
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
-        seed(db, dev_accounts=os.getenv("SEED_DEV_ACCOUNTS", "1") == "1")
-    print("Seeded. Dev accounts:" if os.getenv("SEED_DEV_ACCOUNTS", "1") == "1" else "Seeded.")
-    if os.getenv("SEED_DEV_ACCOUNTS", "1") == "1":
+        if not dev_accounts and db.query(M.User).filter_by(role="admin").first() is None:
+            email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+            password = os.getenv("ADMIN_PASSWORD", "")
+            if not email or not 10 <= len(password) <= 128:
+                raise SystemExit("no admin account yet: set ADMIN_EMAIL and ADMIN_PASSWORD "
+                                 "(10-128 characters) for this first seed")
+            if db.query(M.User).filter_by(email=email).first():
+                raise SystemExit(f"{email} already exists and is not an admin")
+            db.add(M.User(email=email, role="admin", password_hash=hash_password(password),
+                          display_name="Administrator"))
+            db.commit()
+        seed(db, dev_accounts=dev_accounts)
+    print("Seeded. Dev accounts:" if dev_accounts else "Seeded.")
+    if dev_accounts:
         for email, role, pw, _ in DEV_ACCOUNTS:
             print(f"  {role:13s} {email}  /  {pw}")
 

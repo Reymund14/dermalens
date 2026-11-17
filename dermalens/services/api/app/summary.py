@@ -81,7 +81,13 @@ def build_data(db: Session, s: M.CaptureSession, summary_id: str) -> dict:
 
 
 def _thumb(key: str) -> str:
-    img = Image.open(io.BytesIO(storage.get(key))).convert("RGB")
+    if key == "purged":
+        return ""
+    try:
+        data = storage.get(key)
+    except FileNotFoundError:
+        return ""
+    img = Image.open(io.BytesIO(data)).convert("RGB")
     img.thumbnail((220, 220))
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=80)
@@ -119,8 +125,8 @@ def render_pdf(data: dict, image_keys: dict[str, str], share_url: str | None) ->
                         f"<td><h3>PM</h3><ol>{lst(r['pm'])}</ol></td></tr></table>")
     elif r:
         routine_html = "<p>" + e(" ".join(r.get("notes", []))) + "</p>"
-    thumbs = "".join(f"<figure><img src='{_thumb(k)}'/><figcaption>{e(v)}</figcaption></figure>"
-                     for v, k in image_keys.items())
+    thumbs = "".join(f"<figure><img src='{src}'/><figcaption>{e(v)}</figcaption></figure>"
+                     for v, k in image_keys.items() if (src := _thumb(k)))
     quality = "".join(
         f"<tr><td>{e(v)}</td><td>{'pass' if q['pass'] else 'fail'}</td>"
         f"<td>{e(', '.join(f'{k}: {chr(10003) if ok else chr(10007)}' for k, ok in (q['checks'] or {}).items()))}</td></tr>"

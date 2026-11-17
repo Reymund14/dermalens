@@ -229,7 +229,7 @@ def result(session_id: str, user: M.User = Depends(patient), db: Session = Depen
 def session_image(session_id: str, view: str, user: M.User = Depends(patient), db: Session = Depends(get_db)):
     s = own_session(db, user, session_id)
     img = current_images(s).get(view)
-    if img is None:
+    if img is None or img.object_key == "purged":
         raise HTTPException(404, "no image")
     return Response(storage.get(img.object_key), media_type="image/jpeg",
                     headers={"Cache-Control": "private, no-store"})
@@ -247,9 +247,12 @@ def make_summary(session_id: str, body: SummaryIn, request: Request, user: M.Use
         raise HTTPException(403, "turn on 'share with ICONIC' consent first")
     summary_id = uuid.uuid4()
     token = secrets.token_urlsafe(24) if body.share_with_iconic else None
-    share_url = f"{str(request.base_url).rstrip('/')}/clinic/s/{token}" if token else None
+    base = (settings.public_base_url or str(request.base_url)).rstrip("/")
+    share_url = f"{base}/api/v1/clinic/s/{token}" if token else None
     data = build_data(db, s, str(summary_id))
-    keys = {v: i.object_key for v, i in current_images(s).items() if v in REQUIRED_VIEWS}
+    # Do not embed face photos in the exported PDF without image-storage consent.
+    keep_images = latest_consents(db, user.id).get("image_storage", False)
+    keys = {v: i.object_key for v, i in current_images(s).items() if v in REQUIRED_VIEWS} if keep_images else {}
     pdf = render_pdf(data, keys, share_url)
     pdf_key = f"summaries/{s.user_id}/{summary_id}.pdf"
     storage.put(pdf_key, pdf)
@@ -271,6 +274,8 @@ def summary_pdf(summary_id: str, request: Request, user: M.User = Depends(patien
     row = db.get(M.ConsultationSummary, uuid.UUID(summary_id))
     if row is None or db.get(M.CaptureSession, row.session_id).user_id != user.id:
         raise HTTPException(404, "summary not found")
+    if row.pdf_object_key == "purged":
+        raise HTTPException(410, "summary PDF is no longer retained")
     audit(db, user, "download_pdf", "consultation_summary", summary_id, request)
     db.commit()
     return Response(storage.get(row.pdf_object_key), media_type="application/pdf",
@@ -297,19 +302,48 @@ def export_me(request: Request, user: M.User = Depends(patient), db: Session = D
 
 @router.delete("/me", status_code=202)
 def delete_me(request: Request, user: M.User = Depends(patient), db: Session = Depends(get_db)):
-    """Erasure request: images and personal data are purged now; the account is closed."""
-    for s in db.query(M.CaptureSession).filter_by(user_id=user.id):
+    """Erasure request: photos, summaries, intakes and inferences are deleted now."""
+    sessions = db.query(M.CaptureSession).filter_by(user_id=user.id).all()
+    session_ids = [s.id for s in sessions]
+    for s in sessions:
         storage.delete_prefix(f"sessions/{s.id}")
     storage.delete_prefix(f"summaries/{user.id}")
-    p = db.get(M.PatientProfile, user.id)
-    if p is not None:
-        p.full_name_enc = encrypt("[erased]")
-        p.birth_year = None
-    for i in db.query(M.IntakeRow).filter_by(user_id=user.id):
-        i.free_text_enc = None
+
+    summary_ids = [r.id for r in db.query(M.ConsultationSummary).filter(
+        M.ConsultationSummary.session_id.in_(session_ids))] if session_ids else []
+    if summary_ids:
+        db.query(M.DermReview).filter(M.DermReview.summary_id.in_(summary_ids)).delete(synchronize_session=False)
+        db.query(M.ConsultationSummary).filter(M.ConsultationSummary.id.in_(summary_ids)).delete(
+            synchronize_session=False)
+
+    if session_ids:
+        triage_ids = [t.id for t in db.query(M.TriageDecision).filter(
+            M.TriageDecision.session_id.in_(session_ids))]
+        rec_ids = [r.id for r in db.query(M.Recommendation).filter(
+            M.Recommendation.triage_id.in_(triage_ids))] if triage_ids else []
+        if rec_ids:
+            db.query(M.RecommendationItem).filter(M.RecommendationItem.recommendation_id.in_(rec_ids)).delete(
+                synchronize_session=False)
+            db.query(M.Recommendation).filter(M.Recommendation.id.in_(rec_ids)).delete(synchronize_session=False)
+        db.query(M.TriageDecision).filter(M.TriageDecision.session_id.in_(session_ids)).delete(
+            synchronize_session=False)
+        inference_ids = [i.id for i in db.query(M.InferenceRow).filter(
+            M.InferenceRow.session_id.in_(session_ids))]
+        if inference_ids:
+            db.query(M.InferenceLabel).filter(M.InferenceLabel.inference_id.in_(inference_ids)).delete(
+                synchronize_session=False)
+        db.query(M.InferenceRow).filter(M.InferenceRow.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(M.ImageRow).filter(M.ImageRow.session_id.in_(session_ids)).delete(synchronize_session=False)
+        db.query(M.CaptureSession).filter(M.CaptureSession.id.in_(session_ids)).delete(synchronize_session=False)
+
+    db.query(M.IntakeRow).filter_by(user_id=user.id).delete(synchronize_session=False)
     db.query(M.UserAllergen).filter_by(user_id=user.id).delete()
     db.query(M.RefreshToken).filter_by(user_id=user.id).delete()
+    profile = db.get(M.PatientProfile, user.id)
+    if profile is not None:
+        db.delete(profile)
     user.email = f"erased-{user.id}@invalid"
+    user.disabled_at = now()
     user.deleted_at = now()
     audit(db, user, "delete_account", "user", user.id, request)
     db.commit()

@@ -170,6 +170,11 @@ def purge_images(request: Request, user: M.User = Depends(admin), db: Session = 
             storage.delete_prefix(f"sessions/{s.id}")
             for i in s.images:
                 i.object_key = "purged"
+            # Summary PDFs embed the photos, so they go at the same time.
+            for summary in db.query(M.ConsultationSummary).filter_by(session_id=s.id):
+                if summary.pdf_object_key != "purged":
+                    storage.delete_prefix(summary.pdf_object_key)
+                summary.pdf_object_key = "purged"
             purged += 1
     audit(db, user, "purge_images", "capture_session", "*", request, {"sessions": purged})
     db.commit()

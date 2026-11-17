@@ -1,18 +1,24 @@
 # Local stack: PostgreSQL 16 + inference service + API.
+#   export JWT_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"
+#   export DATA_KEY="$(python -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
+#   export POSTGRES_PASSWORD="$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
+#   export PUBLIC_BASE_URL="https://api.your-clinic.example"
+#   export CORS_ORIGINS="https://app.your-clinic.example"
 #   docker compose -f infra/docker-compose.yml up --build
-# Then seed once:
-#   docker compose -f infra/docker-compose.yml exec api python -m app.seed
+# Then seed once, creating the first admin (no dev accounts):
+#   docker compose -f infra/docker-compose.yml exec -e ADMIN_EMAIL=you@clinic.example \
+#     -e ADMIN_PASSWORD='a-long-password' api python -m app.seed
 services:
   db:
     image: postgres:16
     environment:
       POSTGRES_DB: dermalens
       POSTGRES_USER: dermalens
-      POSTGRES_PASSWORD: dermalens-dev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ../services/api/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
-    ports: ["5432:5432"]
+    # Internal only: never publish the database port on the host.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dermalens"]
       interval: 3s
@@ -20,18 +26,23 @@ services:
   inference:
     build: { context: .., dockerfile: services/inference/Dockerfile }
     # To serve a trained model, mount it and set DERMALENS_MODEL_PATH, DERMALENS_MODEL_CONFIG, DERMALENS_MODEL_SHA256.
-    ports: ["8001:8001"]
+    # Internal only: the inference API has no authentication of its own.
+    expose: ["8001"]
   api:
     build: { context: .., dockerfile: services/api/Dockerfile }
     depends_on:
       db: { condition: service_healthy }
       inference: { condition: service_started }
     environment:
-      DATABASE_URL: postgresql+psycopg://dermalens:dermalens-dev@db:5432/dermalens
+      DERMALENS_ENV: production
+      DATABASE_URL: postgresql+psycopg://dermalens:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/dermalens
       INFERENCE_URL: http://inference:8001
       STORAGE_DIR: /data/storage
-      JWT_SECRET: change-me-in-every-real-environment-please
-      # DATA_KEY: generate with  python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL to the public HTTPS origin}
+      CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to the app's HTTPS origin}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET before starting the stack}
+      DATA_KEY: ${DATA_KEY:?set DATA_KEY before starting the stack}
+      SEED_DEV_ACCOUNTS: "0"
     volumes:
       - storage:/data/storage
     ports: ["8000:8000"]

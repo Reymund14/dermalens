@@ -1,0 +1,76 @@
+# Render Blueprint for DermaLens.
+# Before the first deploy, create the Supabase project and run
+# dermalens/services/api/migrations/001_init.sql in its SQL editor (or let the
+# API's pre-deploy seed create the tables). Use the session pooler URL with the
+# psycopg scheme, e.g.
+#   postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+# Keep this region the same as your Supabase region. Render prompts for the
+# sync:false values when the blueprint is applied.
+
+services:
+  - type: pserv
+    runtime: docker
+    name: dermalens-inference
+    region: singapore
+    plan: 0.5c-512mb
+    dockerfilePath: ./dermalens/services/inference/Dockerfile
+    dockerContext: ./dermalens
+    # Match Render's PORT routing to the service's listener.
+    envVars:
+      - key: PORT
+        value: "8001"
+
+  - type: web
+    runtime: docker
+    name: dermalens-api
+    region: singapore
+    plan: 1c-2g
+    numInstances: 1 # in-process auth rate limiter: do not scale out
+    dockerfilePath: ./dermalens/services/api/Dockerfile
+    dockerContext: ./dermalens
+    dockerCommand: "uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"
+    healthCheckPath: /health
+    preDeployCommand: python -m app.seed
+    disk:
+      name: dermalens-storage
+      mountPath: /data/storage
+      sizeGB: 5
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: DERMALENS_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false # Supabase session pooler URL, with postgresql+psycopg:// scheme
+      - key: JWT_SECRET
+        sync: false # random 32+ byte string
+      - key: DATA_KEY
+        sync: false # Fernet key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: ADMIN_EMAIL
+        sync: false # first admin, used by the pre-deploy seed
+      - key: ADMIN_PASSWORD
+        sync: false # 10-128 characters
+      - key: SEED_DEV_ACCOUNTS
+        value: "0"
+      - key: STORAGE_DIR
+        value: /data/storage
+      - key: INFERENCE_URL
+        value: http://dermalens-inference:8001
+      - key: PUBLIC_BASE_URL
+        fromService:
+          name: dermalens-api
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: CORS_ORIGINS
+        value: https://dermalens-web.onrender.com
+
+  - type: web
+    runtime: static
+    name: dermalens-web
+    buildCommand: cd dermalens/apps/mobile && npm install && npx expo export --platform web
+    staticPublishPath: ./dermalens/apps/mobile/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: EXPO_PUBLIC_API_URL
+        value: https://dermalens-api.onrender.com
