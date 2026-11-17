@@ -89,7 +89,7 @@ Development accounts (created only when `SEED_DEV_ACCOUNTS=1`; `./dev.sh` sets i
 
 - **Live capture checks.** The roadmap's six live checks with auto-shutter need `react-native-vision-camera` frame processors and MediaPipe Face Mesh in a development build. This version uses Expo's camera (runs in Expo Go) and checks each photo on the server right after it is taken, with plain-language retake tips. The server checks are resolution, face/skin presence, sharpness, exposure and even lighting; head pose is not checked yet.
 - **Background jobs** use FastAPI `BackgroundTasks` instead of Celery + Redis. Swap in Celery when load requires it; `pipeline.process_session` is the task body.
-- **Object storage** is local disk behind `app/storage.py` (put/get/delete). Replace with S3-compatible storage with server-side encryption.
+- **Object storage** is local disk in development, or a private Supabase Storage bucket when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set. Both are exposed through the same `app/storage.py` (put/get/delete) functions.
 - **Ingredient and product ids** are readable slugs (`niacinamide`, `p-se-vitc`) instead of UUIDs, which makes rule tables reviewable.
 - **Clinic portal.** Staff, dermatologists and admins use the same app (phone or browser build) with their own screens, instead of a separate web portal.
 - **Grad-CAM heat maps** need the trained model; the summary says they are not available for the stub.
@@ -102,5 +102,6 @@ Development accounts (created only when `SEED_DEV_ACCOUNTS=1`; `./dev.sh` sets i
 - Replace the sample catalog with verified products.
 - Set `DERMALENS_ENV=production` and real secrets: `JWT_SECRET` and `DATA_KEY` (Fernet key). Startup fails if either is missing; both are required in every environment; there are no default secrets.
 - Set `PUBLIC_BASE_URL` to the public HTTPS origin (share QR links carry a token) and `CORS_ORIGINS` to the app's explicit HTTPS origin(s); production startup refuses wildcards or HTTP. Run uvicorn with `--proxy-headers` so auth rate limiting sees each client IP, not the proxy's. Run one API instance: the auth rate limiter is in process memory.
+- Create a private Supabase Storage bucket (default name `dermalens`) and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and optionally `SUPABASE_STORAGE_BUCKET`. Production startup fails without the first two; local development keeps using `./storage`.
 - Keep `SEED_DEV_ACCOUNTS=0`, and keep the database port firewalled (the compose file no longer publishes it).
 - Complete the DPIA, and get a written opinion on whether the app is a medical device under FDA Philippines rules.

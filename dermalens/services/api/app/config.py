@@ -45,6 +45,9 @@ class Settings:
     jwt_secret: str = field(default_factory=lambda: _secret("JWT_SECRET"))
     data_key: str = field(default_factory=lambda: _secret("DATA_KEY"))
     storage_dir: Path = field(default_factory=lambda: Path(_env("STORAGE_DIR", "./storage")))
+    supabase_url: str = field(default_factory=lambda: _env("SUPABASE_URL", ""))
+    supabase_service_key: str = field(default_factory=lambda: _env("SUPABASE_SERVICE_ROLE_KEY", ""))
+    supabase_bucket: str = field(default_factory=lambda: _env("SUPABASE_STORAGE_BUCKET", "dermalens"))
     inference_url: str = field(default_factory=lambda: _env("INFERENCE_URL", ""))  # empty = in-process
     # Public origin for share links and QR codes (set behind a reverse proxy).
     public_base_url: str = field(default_factory=_public_base_url)
@@ -60,6 +63,10 @@ class Settings:
     clinic_contact: str = field(default_factory=lambda: _env(
         "CLINIC_CONTACT", "ICONIC Aesthetic Clinic (add address, phone and booking link)"))
     cors_origins: list[str] = field(default_factory=_cors_origins)
+
+    def __post_init__(self) -> None:
+        if PRODUCTION and not (self.supabase_url and self.supabase_service_key):
+            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set when DERMALENS_ENV=production")
 
 
 settings = Settings()

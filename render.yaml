@@ -1,40 +1,28 @@
-# Render Blueprint for DermaLens.
-# Before the first deploy, create the Supabase project and run
-# dermalens/services/api/migrations/001_init.sql in its SQL editor (or let the
-# API's pre-deploy seed create the tables). Use the session pooler URL with the
-# psycopg scheme, e.g.
+# Render Blueprint for DermaLens (free tier).
+# Before the first deploy, create the Supabase project. The API's first-deploy
+# seed creates the tables via SQLAlchemy create_all, or you can run
+# dermalens/services/api/migrations/001_init.sql in the Supabase SQL editor.
+# Use the session pooler URL with the psycopg scheme, e.g.
 #   postgresql+psycopg://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
 # Keep this region the same as your Supabase region. Render prompts for the
 # sync:false values when the blueprint is applied.
+#
+# Free-tier limits: inference runs in-process with the stub classifier (no
+# separate inference service). Images and PDFs live in the private Supabase
+# Storage bucket, so no Render disk is needed. Free web services sleep after
+# inactivity. This is still a demo deployment because the model is a stub.
 
 services:
-  - type: pserv
-    runtime: docker
-    name: dermalens-inference
-    region: singapore
-    plan: 0.5c-512mb
-    dockerfilePath: ./dermalens/services/inference/Dockerfile
-    dockerContext: ./dermalens
-    # Match Render's PORT routing to the service's listener.
-    envVars:
-      - key: PORT
-        value: "8001"
-
   - type: web
     runtime: docker
     name: dermalens-api
     region: singapore
-    plan: 1c-2g
-    numInstances: 1 # in-process auth rate limiter: do not scale out
+    plan: free
     dockerfilePath: ./dermalens/services/api/Dockerfile
     dockerContext: ./dermalens
     dockerCommand: "uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"
     healthCheckPath: /health
-    preDeployCommand: python -m app.seed
-    disk:
-      name: dermalens-storage
-      mountPath: /data/storage
-      sizeGB: 5
+    initialDeployHook: python -m app.seed
     envVars:
       - key: PORT
         value: "8000"
@@ -42,20 +30,24 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false # Supabase session pooler URL, with postgresql+psycopg:// scheme
+      - key: SUPABASE_URL
+        sync: false # https://<project-ref>.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false # service role key; keep secret
+      - key: SUPABASE_STORAGE_BUCKET
+        value: dermalens # private bucket; create it in Supabase Storage
       - key: JWT_SECRET
         sync: false # random 32+ byte string
       - key: DATA_KEY
         sync: false # Fernet key: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       - key: ADMIN_EMAIL
-        sync: false # first admin, used by the pre-deploy seed
+        sync: false # first admin, used by the first-deploy seed
       - key: ADMIN_PASSWORD
         sync: false # 10-128 characters
       - key: SEED_DEV_ACCOUNTS
         value: "0"
-      - key: STORAGE_DIR
-        value: /data/storage
       - key: INFERENCE_URL
-        value: http://dermalens-inference:8001
+        value: "" # empty = in-process stub classifier
       - key: PUBLIC_BASE_URL
         fromService:
           name: dermalens-api
