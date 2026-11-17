@@ -23,7 +23,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -47,6 +48,12 @@
       "expo-secure-store",
       "expo-sharing",
       "expo-status-bar"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "20ff87a8-44ae-4050-b199-3e0743837605"
+      }
+    },
+    "owner": "karlformentera2"
   }
 }
