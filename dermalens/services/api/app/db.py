@@ -20,10 +20,14 @@ def make_engine(url: str):
     elif url.startswith("postgres"):
         host = make_url(url).host
         if host:
-            # Some hosts (including Render's free tier) have no IPv6 egress;
-            # keep the hostname for TLS SNI but connect over IPv4.
-            ipv4 = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
-            kwargs["connect_args"] = {"hostaddr": ipv4}
+            # shortcut: no IPv4 egress on Render free; skip hostaddr if the
+            # host has no A record and let psycopg resolve it as before.
+            try:
+                ipv4 = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+            except socket.gaierror:
+                pass
+            else:
+                kwargs["connect_args"] = {"hostaddr": ipv4}
     eng = create_engine(url, future=True, **kwargs)
     if url.startswith("sqlite"):
         @event.listens_for(eng, "connect")
