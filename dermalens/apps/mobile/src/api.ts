@@ -2,10 +2,17 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
-// API base URL: EXPO_PUBLIC_API_URL, else app.json "extra.apiUrl", else local dev.
-export const API_URL: string =
-  process.env.EXPO_PUBLIC_API_URL ??
-  ((Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl ?? 'http://localhost:8000');
+// API base URL: EXPO_PUBLIC_API_URL, else app.json "extra.apiUrl".
+// A native release must be built with an HTTPS URL; only dev and web fall back to localhost.
+const configured =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (Constants.expoConfig?.extra as { apiUrl?: string } | undefined)?.apiUrl;
+export const API_URL: string = (configured ?? (__DEV__ || Platform.OS === 'web' ? 'http://localhost:8000' : ''))
+  .replace(/\/+$/, '');
+if (!API_URL) throw new Error('EXPO_PUBLIC_API_URL must be set for release builds');
+if (!__DEV__ && Platform.OS !== 'web' && !API_URL.startsWith('https://')) {
+  throw new Error('release builds require an HTTPS API URL');
+}
 
 const KEY = 'dermalens.tokens';
 

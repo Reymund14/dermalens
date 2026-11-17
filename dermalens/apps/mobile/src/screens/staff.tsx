@@ -1,7 +1,8 @@
 // Clinic staff: inbox of shared summaries, case detail, follow-up tracking.
 import { useFocusEffect } from '@react-navigation/native';
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
-import { Platform, Text } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Platform, Text, View } from 'react-native';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
@@ -36,6 +37,9 @@ export function StaffInbox({ navigation }: Props<'StaffInbox'>) {
   const [filter, setFilter] = useState<Filter>('open');
   const [rows, setRows] = useState<CaseBrief[] | null>(null);
   const [qr, setQr] = useState('');
+  const [scan, setScan] = useState(false);
+  const [perm, requestPerm] = useCameraPermissions();
+  const scanned = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(useCallback(() => {
@@ -45,10 +49,24 @@ export function StaffInbox({ navigation }: Props<'StaffInbox'>) {
       .catch(() => setError('Could not load shared summaries.'));
   }, [filter]));
 
-  function openQr() {
-    // Accept a full QR URL (…/clinic/s/<token>) or just the token.
-    const token = qr.trim().split('/').pop();
-    if (token) navigation.navigate('StaffCase', { qrToken: token });
+  // Accept a full QR URL (…/api/v1/clinic/s/<token>) or just the token.
+  function openToken(value: string) {
+    const token = value.trim().split(/[?#]/)[0].replace(/\/+$/, '').split('/').pop();
+    if (!token) return;
+    setScan(false);
+    navigation.navigate('StaffCase', { qrToken: token });
+  }
+
+  function onScan(data: string) {
+    if (scanned.current) return;
+    scanned.current = true;
+    openToken(data);
+  }
+
+  async function startScan() {
+    if (!perm?.granted && !(await requestPerm()).granted) return;
+    scanned.current = false;
+    setScan(true);
   }
 
   return (
@@ -67,8 +85,19 @@ export function StaffInbox({ navigation }: Props<'StaffInbox'>) {
           </>} />
       ))}
       <H2>Open from a QR code</H2>
-      <Field label="Link or code from the patient's PDF" value={qr} onChangeText={setQr} autoCapitalize="none" placeholder="https://…/clinic/s/…" />
-      <Button title="Open summary" kind="secondary" disabled={!qr.trim()} onPress={openQr} />
+      <P muted>Scan the QR code in the patient's PDF, or paste its link or code.</P>
+      {scan ? (
+        <View style={{ aspectRatio: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: '#222', marginBottom: 12 }}>
+          <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => onScan(data)} />
+        </View>
+      ) : null}
+      {Platform.OS !== 'web' ? (
+        <Button title={scan ? 'Stop scanning' : 'Scan with camera'} kind="secondary"
+          onPress={() => { if (scan) setScan(false); else startScan(); }} />
+      ) : null}
+      <Field label="Link or code from the patient's PDF" value={qr} onChangeText={setQr} autoCapitalize="none" placeholder="https://…/api/v1/clinic/s/…" />
+      <Button title="Open summary" kind="secondary" disabled={!qr.trim()} onPress={() => openToken(qr)} />
     </Screen>
   );
 }

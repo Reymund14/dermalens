@@ -10,7 +10,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "ph.iconic.dermalens",
       "infoPlist": {
-        "NSCameraUsageDescription": "DermaLens uses the camera to take three guided face photos for your skin pre-screening.",
+        "NSCameraUsageDescription": "DermaLens uses the camera to take guided face photos and scan clinic QR codes.",
         "NSPhotoLibraryUsageDescription": "Choose a face photo for your skin pre-screening."
       }
     },
@@ -22,19 +22,31 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "permissions": ["android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      ["expo-camera", { "cameraPermission": "DermaLens uses the camera to take three guided face photos for your skin pre-screening.", "recordAudioAndroid": false }],
-      ["expo-image-picker", { "photosPermission": "Choose a face photo for your skin pre-screening." }],
-      "expo-secure-store"
-    ],
-    "extra": {
-      "apiUrl": "http://localhost:8000"
-    }
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "DermaLens uses the camera to take guided face photos and scan clinic QR codes.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose a face photo for your skin pre-screening."
+        }
+      ],
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-status-bar"
+    ]
   }
 }
