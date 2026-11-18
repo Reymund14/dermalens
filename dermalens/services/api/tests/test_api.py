@@ -199,6 +199,15 @@ def test_quality_fail_asks_one_retake_then_refers(client):
     assert res["reasons"][0]["code"] == "quality:failed"
 
 
+def test_register_falls_back_when_quality_cache_is_empty(client):
+    from app.routers.patient import _QUALITY_CACHE
+
+    _QUALITY_CACHE.clear()
+    h, _ = register(client)
+    sid = assess(client, h)
+    assert submit(client, h, sid)["status"] == "complete"
+
+
 def test_upload_token_tamper_rejected(client):
     h, _ = register(client)
     body = {"red_flags": all_flags_no(client)}

@@ -32,6 +32,7 @@ def test_supabase_storage_uses_rest_api(monkeypatch):
     monkeypatch.setattr(settings, "supabase_url", "https://example.supabase.co")
     monkeypatch.setattr(settings, "supabase_service_key", "service-key")
     monkeypatch.setattr(settings, "supabase_bucket", "dermalens")
+    storage._client.cache_clear()
 
     storage.put("sessions/s1/front.jpg", b"jpeg")
     assert storage.get("sessions/s1/front.jpg") == b"jpeg"

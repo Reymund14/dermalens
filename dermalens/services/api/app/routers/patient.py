@@ -7,7 +7,7 @@ from datetime import timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from dermalens_inference.quality import check, strip_exif
+from dermalens_inference.quality import QualityReport, check, strip_exif
 
 from .. import models as M
 from .. import storage
@@ -21,6 +21,9 @@ from ..summary import build_data, render_pdf
 
 router = APIRouter(tags=["patient"])
 patient = require("patient")
+
+# shortcut: in-process so a second worker or a restart falls back to storage.get(); bounded to avoid growth.
+_QUALITY_CACHE: dict[tuple[str, str], QualityReport] = {}
 
 
 def latest_consents(db: Session, user_id) -> dict[str, bool]:
@@ -162,22 +165,28 @@ async def upload(token: str, request: Request, db: Session = Depends(get_db)):
     except Exception:
         raise HTTPException(415, "not a readable image")
     key = f"sessions/{session_id}/{view}-{secrets.token_hex(6)}.jpg"
+    checksum = sha256_hex(clean)
     storage.put(key, clean)
-    return {"object_key": key, "sha256": sha256_hex(clean)}
+    if len(_QUALITY_CACHE) >= 128:
+        _QUALITY_CACHE.pop(next(iter(_QUALITY_CACHE)))
+    _QUALITY_CACHE[(key, checksum)] = check(clean, view)
+    return {"object_key": key, "sha256": checksum}
 
 
 @router.post("/sessions/{session_id}/images", status_code=201)
 def register_image(session_id: str, body: ImageIn, user: M.User = Depends(patient), db: Session = Depends(get_db)):
     s = own_session(db, user, session_id)
-    if not body.object_key.startswith(f"sessions/{s.id}/"):
-        raise HTTPException(422, "object key does not belong to this session")
-    try:
-        data = storage.get(body.object_key)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(422, "object not uploaded")
-    if sha256_hex(data) != body.sha256:
-        raise HTTPException(422, "checksum mismatch")
-    q = check(data, body.view)
+    if not body.object_key.startswith(f"sessions/{s.id}/{body.view}-"):
+        raise HTTPException(422, "object key does not belong to this session and view")
+    q = _QUALITY_CACHE.pop((body.object_key, body.sha256), None)
+    if q is None:
+        try:
+            data = storage.get(body.object_key)
+        except (FileNotFoundError, ValueError):
+            raise HTTPException(422, "object not uploaded")
+        if sha256_hex(data) != body.sha256:
+            raise HTTPException(422, "checksum mismatch")
+        q = check(data, body.view)
     for old in s.images:
         if old.view == body.view and not old.superseded:
             old.superseded = True
@@ -212,12 +221,11 @@ def submit(session_id: str, tasks: BackgroundTasks, user: M.User = Depends(patie
 @router.get("/sessions")
 def list_sessions(user: M.User = Depends(patient), db: Session = Depends(get_db)):
     rows = db.query(M.CaptureSession).filter_by(user_id=user.id).order_by(M.CaptureSession.created_at.desc()).all()
-    out = []
-    for s in rows:
-        td = db.query(M.TriageDecision).filter_by(session_id=s.id).one_or_none()
-        out.append({"session_id": str(s.id), "status": s.status, "created_at": s.created_at.isoformat(),
-                    "route": td.route if td else None})
-    return out
+    ids = [s.id for s in rows]
+    routes = ({t.session_id: t.route for t in db.query(M.TriageDecision).filter(M.TriageDecision.session_id.in_(ids))}
+              if ids else {})
+    return [{"session_id": str(s.id), "status": s.status, "created_at": s.created_at.isoformat(),
+             "route": routes.get(s.id)} for s in rows]
 
 
 @router.get("/sessions/{session_id}/result")
@@ -243,7 +251,8 @@ def make_summary(session_id: str, body: SummaryIn, request: Request, user: M.Use
     s = own_session(db, user, session_id)
     if s.status != "complete":
         raise HTTPException(409, "the assessment is not complete")
-    if body.share_with_iconic and not latest_consents(db, user.id).get("share_with_clinic"):
+    consents = latest_consents(db, user.id)
+    if body.share_with_iconic and not consents.get("share_with_clinic"):
         raise HTTPException(403, "turn on 'share with ICONIC' consent first")
     summary_id = uuid.uuid4()
     token = secrets.token_urlsafe(24) if body.share_with_iconic else None
@@ -251,7 +260,7 @@ def make_summary(session_id: str, body: SummaryIn, request: Request, user: M.Use
     share_url = f"{base}/api/v1/clinic/s/{token}" if token else None
     data = build_data(db, s, str(summary_id))
     # Do not embed face photos in the exported PDF without image-storage consent.
-    keep_images = latest_consents(db, user.id).get("image_storage", False)
+    keep_images = consents.get("image_storage", False)
     keys = {v: i.object_key for v, i in current_images(s).items() if v in REQUIRED_VIEWS} if keep_images else {}
     pdf = render_pdf(data, keys, share_url)
     pdf_key = f"summaries/{s.user_id}/{summary_id}.pdf"

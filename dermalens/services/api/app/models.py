@@ -203,7 +203,7 @@ class Product(Base):
                                                         "sunscreen", "exfoliant"))),)
     fda: Mapped["ProductFdaNotification | None"] = relationship(uselist=False, lazy="joined")
     ingredients: Mapped[list["ProductIngredient"]] = relationship(order_by="ProductIngredient.position",
-                                                                  cascade="all, delete-orphan")
+                                                                  cascade="all, delete-orphan", lazy="selectin")
 
 
 class ProductFdaNotification(Base):
