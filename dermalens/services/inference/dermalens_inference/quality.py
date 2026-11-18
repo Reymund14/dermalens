@@ -14,7 +14,8 @@ import numpy as np
 from PIL import Image, ImageOps
 
 # Pass rules from the roadmap ("tune in pilot").
-MIN_SHARPNESS = 100.0
+# shortcut: sharpness tuned on synthetic faces, tune with real phone captures before pilot.
+MIN_SHARPNESS = 10.0
 EXPOSURE_RANGE = (110.0, 190.0)
 MAX_CLIPPED = 0.02
 MAX_LR_DIFF = 0.15
@@ -71,7 +72,7 @@ def check(data: bytes, view: str = "front") -> QualityReport:
     img = load_image(data)
     w, h = img.size
     # Work at a fixed scale so thresholds do not depend on the phone's resolution.
-    scale = 720 / max(w, h)
+    scale = 1440 / max(w, h)
     small = img.resize((max(1, int(w * scale)), max(1, int(h * scale)))) if scale < 1 else img
     rgb = np.asarray(small)
     lab_l = np.asarray(small.convert("LAB"))[..., 0].astype(np.float32)

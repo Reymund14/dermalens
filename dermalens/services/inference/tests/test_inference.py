@@ -18,6 +18,15 @@ def test_quality_pass_on_good_image():
     assert r.quality_pass, r.checks
 
 
+def test_quality_pass_on_phone_resized_image():
+    im = Image.open(io.BytesIO(synth_face(size=(3024, 4032))))
+    im.thumbnail((1440, 1440))
+    buf = io.BytesIO()
+    im.save(buf, format="JPEG", quality=90)
+    r = check(strip_exif(buf.getvalue()), "front")
+    assert r.quality_pass, r.checks
+
+
 def test_quality_fails_when_blurred():
     r = check(synth_face(blur=6), "front")
     assert not r.checks["sharpness"]
