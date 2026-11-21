@@ -75,7 +75,6 @@ services:
   - type: web
     runtime: static
     name: dermalens-web # Expo web build of the phone app
-    plan: free
     buildCommand: cd dermalens/apps/mobile && npm ci && npx expo export --platform web --clear --output-dir dist
     staticPublishPath: ./dermalens/apps/mobile/dist
     routes:
@@ -91,7 +90,6 @@ services:
   - type: web
     runtime: static
     name: dermalens-app # desktop web app for all roles (apps/web)
-    plan: free
     buildCommand: cd dermalens/apps/web && npm ci && npm run build
     staticPublishPath: ./dermalens/apps/web/dist
     headers:
