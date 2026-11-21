@@ -14,6 +14,16 @@ CREATE TABLE concerns (
 	PRIMARY KEY (code)
 );
 
+CREATE TABLE email_log (
+	id BIGSERIAL NOT NULL, 
+	to_addr VARCHAR(320) NOT NULL, 
+	kind VARCHAR(40) NOT NULL, 
+	status VARCHAR(16) NOT NULL, 
+	error TEXT, 
+	at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id)
+);
+
 CREATE TABLE ingredient_families (
 	code VARCHAR(40) NOT NULL, 
 	display_name TEXT NOT NULL, 
@@ -76,6 +86,9 @@ CREATE TABLE users (
 	display_name TEXT, 
 	created_by UUID, 
 	disabled_at TIMESTAMP WITH TIME ZONE, 
+	email_verified_at TIMESTAMP WITH TIME ZONE, 
+	failed_logins INTEGER NOT NULL, 
+	locked_until TIMESTAMP WITH TIME ZONE, 
 	mfa_secret_enc BYTEA, 
 	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	deleted_at TIMESTAMP WITH TIME ZONE, 
@@ -99,6 +112,20 @@ CREATE TABLE audit_log (
 );
 
 CREATE INDEX ix_audit_log_entity ON audit_log (entity, entity_id);
+
+CREATE TABLE auth_tokens (
+	id UUID NOT NULL, 
+	user_id UUID NOT NULL, 
+	purpose VARCHAR(16) NOT NULL, 
+	token_hash VARCHAR(64) NOT NULL, 
+	expires_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	used_at TIMESTAMP WITH TIME ZONE, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CHECK (purpose IN ('reset', 'verify')), 
+	FOREIGN KEY(user_id) REFERENCES users (id), 
+	UNIQUE (token_hash)
+);
 
 CREATE TABLE consents (
 	id UUID NOT NULL, 

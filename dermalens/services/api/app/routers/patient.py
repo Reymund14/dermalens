@@ -9,12 +9,13 @@ from sqlalchemy.orm import Session
 
 from dermalens_inference.quality import QualityReport, check, strip_exif
 
+from .. import mailer
 from .. import models as M
 from .. import storage
 from ..config import settings
 from ..db import get_db
 from ..pipeline import REQUIRED_VIEWS, current_images, process_session
-from ..present import session_result
+from ..present import compare_with_previous, session_result
 from ..schemas import ConsentIn, ImageIn, IntakeIn, ProfileIn, SessionIn, SummaryIn
 from ..security import audit, decrypt, encrypt, now, require, sha256_hex, sign_upload, verify_upload
 from ..summary import build_data, render_pdf
@@ -230,7 +231,11 @@ def list_sessions(user: M.User = Depends(patient), db: Session = Depends(get_db)
 
 @router.get("/sessions/{session_id}/result")
 def result(session_id: str, user: M.User = Depends(patient), db: Session = Depends(get_db)):
-    return session_result(db, own_session(db, user, session_id))
+    s = own_session(db, user, session_id)
+    out = session_result(db, s)
+    if s.status == "complete":
+        out["compare"] = compare_with_previous(db, s)
+    return out
 
 
 @router.get("/sessions/{session_id}/images/{view}")
@@ -246,8 +251,8 @@ def session_image(session_id: str, view: str, user: M.User = Depends(patient), d
 # ----- Summary ----------------------------------------------------------------
 
 @router.post("/sessions/{session_id}/summary", status_code=201)
-def make_summary(session_id: str, body: SummaryIn, request: Request, user: M.User = Depends(patient),
-                 db: Session = Depends(get_db)):
+def make_summary(session_id: str, body: SummaryIn, request: Request, tasks: BackgroundTasks,
+                 user: M.User = Depends(patient), db: Session = Depends(get_db)):
     s = own_session(db, user, session_id)
     if s.status != "complete":
         raise HTTPException(409, "the assessment is not complete")
@@ -273,6 +278,12 @@ def make_summary(session_id: str, body: SummaryIn, request: Request, user: M.Use
     audit(db, user, "export_pdf", "consultation_summary", summary_id, request,
           {"shared_with": row.shared_with})
     db.commit()
+    if token and settings.clinic_notify_email:
+        # Deliberately says nothing about the patient or the findings: email is not a safe channel.
+        tasks.add_task(mailer.send, settings.clinic_notify_email, "clinic_new_case",
+                       "New DermaLens pre-screening summary",
+                       "A patient shared a new pre-screening summary with ICONIC.\n"
+                       f"Open the clinic inbox to follow up: {settings.public_web_url}/#/inbox")
     return {"summary_id": str(summary_id), "pdf_url": f"/api/v1/summaries/{summary_id}/pdf",
             "shared_with": row.shared_with, "share_url": share_url,
             "expires_at": row.expires_at.isoformat() if row.expires_at else None, "data": data}

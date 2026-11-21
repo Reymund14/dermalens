@@ -73,3 +73,42 @@ def session_result(db: Session, s: M.CaptureSession) -> dict:
         "copy": C.COPY_VERSION,
     }
     return out
+
+
+ORDER = {"none": 0, "mild": 1, "moderate": 2, "marked": 3}
+
+
+def compare_with_previous(db: Session, s: M.CaptureSession) -> dict | None:
+    """How each concern's grade moved since the patient's previous completed check.
+    Grades are the model's estimate from photos, so the wording stays cautious."""
+    prev = (db.query(M.CaptureSession)
+            .filter(M.CaptureSession.user_id == s.user_id, M.CaptureSession.status == "complete",
+                    M.CaptureSession.created_at < s.created_at)
+            .order_by(M.CaptureSession.created_at.desc()).first())
+    if prev is None:
+        return None
+
+    def grades(sess: M.CaptureSession) -> tuple[dict, str | None]:
+        td = db.query(M.TriageDecision).filter_by(session_id=sess.id).one_or_none()
+        if td is None or td.inference_id is None or td.route == "urgent_care":
+            return {}, td.route if td else None
+        inf = db.get(M.InferenceRow, td.inference_id)
+        if inf is None or not inf.quality_pass:
+            return {}, td.route
+        return {lab.concern_code: lab.grade for lab in inf.labels}, td.route
+
+    now_g, now_route = grades(s)
+    old_g, old_route = grades(prev)
+    rows = []
+    for code in sorted(set(now_g) | set(old_g)):
+        a, b = old_g.get(code), now_g.get(code)
+        trend = ("unknown" if a is None or b is None else
+                 "better" if ORDER[b] < ORDER[a] else "worse" if ORDER[b] > ORDER[a] else "same")
+        rows.append({"code": code, "name": C.CONCERN_NAMES[code], "trend": trend,
+                     "before": C.GRADE_NAMES[a] if a is not None else None,
+                     "now": C.GRADE_NAMES[b] if b is not None else None})
+    days = (s.created_at - prev.created_at).days
+    return {"previous_session_id": str(prev.id), "previous_at": prev.created_at.isoformat(), "days_between": days,
+            "route_before": old_route, "route_now": now_route, "concerns": rows,
+            "note": "Changes are estimated from photos. Lighting and angle affect them; "
+                    "a dermatologist should confirm real progress."}

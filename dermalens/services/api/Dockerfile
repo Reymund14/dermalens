@@ -12,4 +12,4 @@ COPY services/api services/api
 ENV PYTHONPATH=/srv/packages/rules:/srv/services/inference:/srv/services/api
 WORKDIR /srv/services/api
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "start.sh"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, timedelta
+from datetime import date, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -104,6 +104,8 @@ def delist_product(product_id: str, request: Request, user: M.User = Depends(adm
 def get_rules(user: M.User = Depends(admin), db: Session = Depends(get_db)):
     return {
         "rule_set_version": db.get(M.AppSetting, "rule_set_version").value,
+        "families": [{"code": f.code, "name": f.display_name} for f in db.query(M.IngredientFamily).order_by(
+            M.IngredientFamily.code)],
         "conflicts": [{"id": str(c.id), "family_a": c.family_a, "family_b": c.family_b, "scope": c.scope,
                        "resolution": c.resolution, "rationale": c.rationale} for c in db.query(M.IngredientConflict)],
         "contraindications": [{"condition": c.condition_code, "family": c.family_code, "ingredient": c.ingredient_id,
@@ -216,7 +218,9 @@ def dashboard(user: M.User = Depends(admin), db: Session = Depends(get_db)):
 
 def _user_out(u: M.User) -> dict:
     return {"id": str(u.id), "email": u.email, "role": u.role, "display_name": u.display_name,
-            "disabled": u.disabled_at is not None, "created_at": u.created_at.isoformat()}
+            "disabled": u.disabled_at is not None, "created_at": u.created_at.isoformat(),
+            "locked": bool(u.locked_until and (u.locked_until if u.locked_until.tzinfo else
+                                               u.locked_until.replace(tzinfo=timezone.utc)) > now())}
 
 
 @router.get("/users")
@@ -235,7 +239,8 @@ def create_user(body: StaffUserIn, request: Request, user: M.User = Depends(admi
     if db.query(M.User).filter_by(email=email).first():
         raise HTTPException(409, "an account with this email already exists")
     u = M.User(email=email, role=body.role, display_name=body.display_name,
-               password_hash=hash_password(body.password), created_by=user.id)
+               password_hash=hash_password(body.password), created_by=user.id,
+               email_verified_at=now())  # the admin vouches for staff addresses
     db.add(u)
     db.flush()
     audit(db, user, "create_user", "user", u.id, request, {"role": body.role})
@@ -263,6 +268,7 @@ def update_user(user_id: str, body: UserPatchIn, request: Request, user: M.User 
         changes["disabled"] = body.disabled
     if body.password is not None:
         u.password_hash = hash_password(body.password)
+        u.failed_logins, u.locked_until = 0, None  # a reset also unlocks
         changes["password_reset"] = True
     if changes.get("disabled") or "password_reset" in changes or "role" in changes:
         # Sign the account out everywhere; access tokens lapse within 15 minutes and
@@ -284,8 +290,10 @@ def list_models(user: M.User = Depends(admin), db: Session = Depends(get_db)):
 
 @router.get("/audit")
 def audit_log(action: str | None = None, entity: str | None = None, limit: int = 100,
-              user: M.User = Depends(admin), db: Session = Depends(get_db)):
+              before_id: int | None = None, user: M.User = Depends(admin), db: Session = Depends(get_db)):
     q = db.query(M.AuditLog)
+    if before_id:
+        q = q.filter(M.AuditLog.id < before_id)
     if action:
         q = q.filter_by(action=action)
     if entity:

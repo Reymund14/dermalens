@@ -60,6 +60,9 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(Text)  # staff, dermatologist and admin accounts
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     disabled_at: Mapped[datetime | None] = mapped_column(TS)
+    email_verified_at: Mapped[datetime | None] = mapped_column(TS)
+    failed_logins: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(TS)
     mfa_secret_enc: Mapped[bytes | None] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(TS, default=now, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(TS)
@@ -481,6 +484,32 @@ class RuleSignoff(Base):
     signed_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
     signed_at: Mapped[datetime] = mapped_column(TS, default=now, nullable=False)
+
+
+class AuthToken(Base):
+    """Single-use email links: password reset (30 minutes) and email verification (7 days).
+    Only the SHA-256 of the token is stored."""
+    __tablename__ = "auth_tokens"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TS, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(TS)
+    created_at: Mapped[datetime] = mapped_column(TS, default=now, nullable=False)
+    __table_args__ = (CheckConstraint(_in("purpose", ("reset", "verify"))),)
+
+
+class EmailLog(Base):
+    """Which emails were sent, to whom and whether delivery worked. Never the body:
+    reset and verification links must not be readable from the database."""
+    __tablename__ = "email_log"
+    id: Mapped[int] = mapped_column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    to_addr: Mapped[str] = mapped_column(String(320), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)  # sent | logged | failed
+    error: Mapped[str | None] = mapped_column(Text)
+    at: Mapped[datetime] = mapped_column(TS, default=now, nullable=False)
 
 
 class AuditLog(Base):

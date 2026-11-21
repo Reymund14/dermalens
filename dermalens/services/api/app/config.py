@@ -39,6 +39,13 @@ def _public_base_url() -> str:
     return url
 
 
+def _public_web_url() -> str:
+    url = _env("PUBLIC_WEB_URL", "http://localhost:5173").rstrip("/")
+    if PRODUCTION and not url.startswith("https://"):
+        raise RuntimeError("PUBLIC_WEB_URL must be an HTTPS origin when DERMALENS_ENV=production")
+    return url
+
+
 @dataclass
 class Settings:
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL", "sqlite:///./dermalens-dev.db"))
@@ -51,7 +58,19 @@ class Settings:
     inference_url: str = field(default_factory=lambda: _env("INFERENCE_URL", ""))  # empty = in-process
     # Public origin for share links and QR codes (set behind a reverse proxy).
     public_base_url: str = field(default_factory=_public_base_url)
+    # Address of the web app, used in emailed reset and verification links.
+    public_web_url: str = field(default_factory=_public_web_url)
     auth_rate_limit_enabled: bool = field(default_factory=lambda: _env_bool("AUTH_RATE_LIMIT_ENABLED", "1"))
+    rate_limits: bool = field(default_factory=lambda: _env_bool("RATE_LIMITS", "1"))
+    max_failed_logins: int = 5
+    lockout_minutes: int = 15
+    # Without SMTP_HOST, emails are written to the API log (development/e2e).
+    smtp_host: str = field(default_factory=lambda: _env("SMTP_HOST", ""))
+    smtp_port: int = field(default_factory=lambda: int(_env("SMTP_PORT", "587")))
+    smtp_user: str = field(default_factory=lambda: _env("SMTP_USER", ""))
+    smtp_password: str = field(default_factory=lambda: _env("SMTP_PASSWORD", ""))
+    mail_from: str = field(default_factory=lambda: _env("MAIL_FROM", "DermaLens <no-reply@localhost>"))
+    clinic_notify_email: str = field(default_factory=lambda: _env("CLINIC_NOTIFY_EMAIL", ""))
     access_token_minutes: int = 15
     refresh_token_days: int = 30
     upload_url_seconds: int = 300

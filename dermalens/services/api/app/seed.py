@@ -17,7 +17,8 @@ from dermalens_rules import seed as S
 from dermalens_rules.triage import RULE_SET_VERSION as TRIAGE_VERSION
 
 from . import models as M
-from .db import Base, SessionLocal, engine
+from .db import SessionLocal, engine
+from .schema_upgrade import upgrade
 from .security import hash_password
 
 DEV_ACCOUNTS = [
@@ -36,7 +37,8 @@ def seed(db: Session, dev_accounts: bool = False) -> None:
     if dev_accounts:
         for email, role, pw, name in DEV_ACCOUNTS:
             if not db.query(M.User).filter_by(email=email).first():
-                db.add(M.User(email=email, role=role, password_hash=hash_password(pw), display_name=name))
+                db.add(M.User(email=email, role=role, password_hash=hash_password(pw), display_name=name,
+                              email_verified_at=M.now()))
         db.flush()
         admin = db.query(M.User).filter_by(email="admin.dev@example.com").one()
     if admin is None:
@@ -102,7 +104,7 @@ def seed(db: Session, dev_accounts: bool = False) -> None:
 
 def main() -> None:
     dev_accounts = os.getenv("SEED_DEV_ACCOUNTS", "0") == "1"
-    Base.metadata.create_all(engine)
+    upgrade()  # create_all also adds old columns' tables, but not columns on existing ones
     with SessionLocal() as db:
         if not dev_accounts and db.query(M.User).filter_by(role="admin").first() is None:
             email = os.getenv("ADMIN_EMAIL", "").strip().lower()
@@ -113,7 +115,7 @@ def main() -> None:
             if db.query(M.User).filter_by(email=email).first():
                 raise SystemExit(f"{email} already exists and is not an admin")
             db.add(M.User(email=email, role="admin", password_hash=hash_password(password),
-                          display_name="Administrator"))
+                          display_name="Administrator", email_verified_at=M.now()))
             db.commit()
         seed(db, dev_accounts=dev_accounts)
     print("Seeded. Dev accounts:" if dev_accounts else "Seeded.")

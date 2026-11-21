@@ -7,13 +7,35 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import defaultdict, deque
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from .config import settings
 
 _hits: dict[str, list[float]] = {}
+_recent: dict[str, deque[float]] = defaultdict(deque)
 _lock = threading.Lock()
+
+
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def hit(key: str, limit: int, window_s: int) -> None:
+    """Sliding-window limit for the account/notification endpoints."""
+    if not settings.rate_limits:
+        return
+    now = time.monotonic()
+    with _lock:
+        q = _recent[key]
+        while q and q[0] <= now - window_s:
+            q.popleft()
+        if len(q) >= limit:
+            retry = int(q[0] + window_s - now) + 1
+            raise HTTPException(429, "too many attempts; please wait and try again",
+                                headers={"Retry-After": str(retry)})
+        q.append(now)
 
 
 def enforce(key: str, limit: int, window_seconds: int) -> None:
@@ -36,3 +58,4 @@ def reset() -> None:
     """Tests only."""
     with _lock:
         _hits.clear()
+        _recent.clear()

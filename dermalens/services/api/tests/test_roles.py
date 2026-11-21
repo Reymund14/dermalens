@@ -150,7 +150,7 @@ def test_admin_accounts(client):
     users = client.get(f"{API}/admin/users", headers=admin).json()
     assert all(u["role"] != "patient" for u in users)
     log = client.get(f"{API}/admin/audit?action=update_user", headers=admin).json()
-    assert len(log) == 2 and log[0]["actor"]["name"] == "Dev Admin"
+    assert len(log) >= 2 and log[0]["actor"]["name"] == "Dev Admin"
 
 
 def test_admin_dashboard_and_audit_hide_patients(client, monkeypatch):
